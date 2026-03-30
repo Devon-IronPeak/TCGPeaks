@@ -2653,6 +2653,7 @@ nav {
     <div id="sell-tab-cards" style="display:none">
       <div class="ctrl-bar" style="padding:0 0 .75rem;">
         <input class="ctrl-search" type="text" placeholder="Search your inventory..." oninput="doSellSearch(this.value)">
+        <button class="a-btn a-btn-g" onclick="openAddCardToStoreModal()" style="white-space:nowrap;flex-shrink:0">➕ Add Card</button>
         <select class="ctrl-sel" onchange="doSellFolderFilter(this.value)" id="sell-fsel"><option value="">All portfolios</option></select>
         <div class="ctrl-cnt" id="sell-cnt">0 items</div>
       </div>
@@ -2702,6 +2703,72 @@ nav {
         </div>
       </div>
     </div>
+  </div>
+</div>
+
+
+<!-- ADD CARD TO STORE MODAL -->
+<div class="modal-backdrop" id="addStoreCardModal">
+  <div class="modal-card" style="width:min(520px,94vw)">
+    <button class="modal-close" onclick="closeModal('addStoreCardModal')">✕</button>
+    <div style="font-family:'Bangers',cursive;font-size:1.6rem;letter-spacing:3px;color:#4ADE80;margin-bottom:1.2rem;">➕ Add Card to Store</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:.6rem;">
+      <div class="f-row" style="margin-bottom:0;grid-column:span 2">
+        <label>Card Name *</label>
+        <input class="f-input" id="storeAddName" type="text" placeholder="e.g. Charizard ex SAR">
+      </div>
+      <div class="f-row" style="margin-bottom:0">
+        <label>Set Name</label>
+        <input class="f-input" id="storeAddSet" type="text" placeholder="e.g. Obsidian Flames">
+      </div>
+      <div class="f-row" style="margin-bottom:0">
+        <label>Card Number</label>
+        <input class="f-input" id="storeAddNum" type="text" placeholder="e.g. 228/197">
+      </div>
+      <div class="f-row" style="margin-bottom:0">
+        <label>Market Price (USD) *</label>
+        <input class="f-input" id="storeAddMarket" type="number" placeholder="0.00" min="0" step="0.01">
+      </div>
+      <div class="f-row" style="margin-bottom:0">
+        <label>Quantity</label>
+        <input class="f-input" id="storeAddQty" type="number" value="1" min="1">
+      </div>
+      <div class="f-row" style="margin-bottom:0">
+        <label>Game</label>
+        <select class="f-input" id="storeAddGame">
+          <option value="pokemon">⚡ Pokémon</option>
+          <option value="onepiece">⚓ One Piece</option>
+        </select>
+      </div>
+      <div class="f-row" style="margin-bottom:0">
+        <label>Type</label>
+        <select class="f-input" id="storeAddCat">
+          <option value="raw">Raw / Ungraded</option>
+          <option value="slab">Graded Slab</option>
+          <option value="sealed">Sealed Product</option>
+          <option value="case">Sealed Case</option>
+        </select>
+      </div>
+      <div class="f-row" style="margin-bottom:0">
+        <label>Grader (if slab)</label>
+        <select class="f-input" id="storeAddGrader">
+          <option value="">None</option>
+          <option value="PSA">PSA</option>
+          <option value="CGC">CGC</option>
+          <option value="BGS">BGS</option>
+          <option value="TAG">TAG</option>
+        </select>
+      </div>
+      <div class="f-row" style="margin-bottom:0">
+        <label>Grade</label>
+        <input class="f-input" id="storeAddGrade" type="number" placeholder="e.g. 9.5" step="0.5" min="1" max="10">
+      </div>
+      <div class="f-row" style="margin-bottom:0;grid-column:span 2">
+        <label>Portfolio / Folder *</label>
+        <select class="f-input" id="storeAddFolder"></select>
+      </div>
+    </div>
+    <button class="submit-btn" onclick="confirmAddStoreCard()" style="margin-top:1rem;background:linear-gradient(135deg,#16A34A,#4ADE80);">Add to Store →</button>
   </div>
 </div>
 
@@ -2837,13 +2904,13 @@ const JustTCG = {
   },
 
   async getCardImage(card) {
-    // Sealed & cases: show set/product image
+    // Sealed & cases: show set logo
     if (card.cat === 'sealed' || card.cat === 'case') {
       return this._getSealedImage(card);
     }
-    // Pokémon singles + slabs (slab = show the raw card inside)
+    // Pokémon singles + slabs (show the card art)
     if (card.game === 'pokemon') {
-      return this._getPokeImage(card);
+      return await this._fetchPokeImage(card);
     }
     // One Piece singles + slabs
     if (card.game === 'onepiece') {
@@ -2858,22 +2925,63 @@ const JustTCG = {
     '151':'sv3pt5','Evolving Skies':'swsh7','Base Set':'base1',
     'Paldean Fates':'sv4pt5','Paradox Rift':'sv4','Temporal Forces':'sv5',
     'Twilight Masquerade':'sv6','Stellar Crown':'sv7','Promos':'swshp',
-    'CoroCoro':'swshp','SV Base':'sv1','Scarlet & Violet Promos':'svp',
+    'CoroCoro':'swshp','SV Base':'sv1','Scarlet & Violet Promos':'svp','SV6':'sv6','SV7':'sv7','SV4':'sv4','SV3':'sv3','SV5':'sv5',
+  },
+
+
+  async _fetchPokeImage(card) {
+    const setCode = this._POKE_SETS[card.set];
+    let cardNum = card.num ? card.num.split('/')[0] : null;
+    if (!setCode || !cardNum || !/^\d+$/.test(cardNum)) return null;
+    cardNum = String(parseInt(cardNum, 10));
+    // Use pokemontcg.io search API (free, no key needed for basic searches)
+    const cacheKey = `${setCode}-${cardNum}`;
+    if (this._imgApiCache && this._imgApiCache[cacheKey]) {
+      return this._imgApiCache[cacheKey];
+    }
+    if (!this._imgApiCache) this._imgApiCache = {};
+    try {
+      const res = await fetch(`https://api.pokemontcg.io/v2/cards?q=set.id:${setCode}+number:${cardNum}&select=id,images`, { signal: AbortSignal.timeout(4000) });
+      const data = await res.json();
+      const url = data?.data?.[0]?.images?.large || data?.data?.[0]?.images?.small || null;
+      this._imgApiCache[cacheKey] = url;
+      return url;
+    } catch(e) {
+      // Fallback to direct CDN with hires
+      return `https://images.pokemontcg.io/${setCode}/${cardNum}_hires.png`;
+    }
   },
 
   _getPokeImage(card) {
     const setCode = this._POKE_SETS[card.set];
-    const cardNum = card.num ? card.num.split('/')[0] : null;
-    if (setCode && cardNum && /^\d+$/.test(cardNum)) {
-      return `https://images.pokemontcg.io/${setCode}/${cardNum}_hires.png`;
+    let cardNum = card.num ? card.num.split('/')[0] : null;
+    if (!setCode || !cardNum) return null;
+    // Strip leading zeros — pokemontcg.io uses plain integers e.g. 4, not 004
+    if (/^\d+$/.test(cardNum)) {
+      cardNum = String(parseInt(cardNum, 10));
+    } else {
+      // Non-numeric promo numbers won't resolve to a known image
+      return null;
     }
-    return null;
+    // Use limitlesstcg as primary source (reliable, CORS-friendly)
+    const setMap = {
+      'sv3':'SV3','sv1':'SV1','pgo':'PGO','sv3pt5':'SV3pt5','swsh7':'SWSH7',
+      'base1':'BASE','sv4pt5':'SV4pt5','sv4':'SV4','sv5':'SV5','sv6':'SV6',
+      'sv7':'SV7','swshp':'SWSHP','svp':'SVP'
+    };
+    const ltSet = setMap[setCode];
+    if (ltSet) {
+      return `https://limitlesstcg.nyc3.digitaloceanspaces.com/tpci/${ltSet}/${ltSet}_${String(cardNum).padStart(3,'0')}_R_EN.webp`;
+    }
+    return `https://images.pokemontcg.io/${setCode}/${cardNum}_hires.png`;
   },
 
   _getOnePieceImage(card) {
-    // Official One Piece TCG card image CDN — num format e.g. "OP01-060"
+    // limitlesstcg CDN - CORS-friendly One Piece card images
     if (card.num && /^OP\d{2}-\d{3}$/i.test(card.num)) {
-      return `https://en.onepiece-cardgame.com/images/cardlist/card/${card.num.toUpperCase()}.png`;
+      const num = card.num.toUpperCase(); // e.g. OP01-060
+      const setCode = num.split('-')[0]; // e.g. OP01
+      return `https://limitlesstcg.nyc3.digitaloceanspaces.com/one-piece/${setCode}/${num}_EN.webp`;
     }
     return null;
   },
@@ -2889,7 +2997,8 @@ const JustTCG = {
       const match = (card.set || card.name || '').match(/OP(\d{2})/i);
       if (match) {
         const setId = `OP${match[1]}`;
-        return `https://en.onepiece-cardgame.com/images/products/${setId.toLowerCase()}_booster_en.png`;
+        // limitlesstcg booster box images
+        return `https://limitlesstcg.nyc3.digitaloceanspaces.com/one-piece/${setId}/${setId}_DISPLAY_EN.webp`;
       }
     }
     return null;
@@ -2980,15 +3089,15 @@ function doLogout() {
 /* ══════════════════════════════════════
    CARD DETAIL MODAL
 ══════════════════════════════════════ */
-async function openCard(card) {
+async async function openCard(card) {
   S.detailCard = card;
   const folder = S.store.folders.find(f => f.id === card.folder) || {};
   const listed = calcPrice(card);
 
   document.getElementById('cdTitle').textContent = card.name;
   document.getElementById('cdSet').textContent = `${card.set}${card.num ? ' · '+card.num : ''}`;
-  document.getElementById('cdMarket').textContent = '$'+card.market.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
-  document.getElementById('cdListed').textContent = '$'+listed.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+  document.getElementById('cdMarket').textContent = window.CAD ? window.CAD.format(card.market) : '$'+card.market.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+  document.getElementById('cdListed').textContent = window.CAD ? window.CAD.format(listed) : '$'+listed.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
   document.getElementById('cdQty').textContent = card.qty;
   document.getElementById('cdPortfolio').textContent = folder.name || '';
   const prem = listed - card.market;
@@ -3039,7 +3148,7 @@ async function openCollCard(card) {
   const listed = card.market;
   document.getElementById('cdTitle').textContent = card.name;
   document.getElementById('cdSet').textContent = `${card.set}${card.num ? ' · '+card.num : ''}`;
-  document.getElementById('cdMarket').textContent = '$'+card.market.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+  document.getElementById('cdMarket').textContent = window.CAD ? window.CAD.format(card.market) : '$'+card.market.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
   document.getElementById('cdListed').textContent = '$'+card.market.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
   document.getElementById('cdQty').textContent = card.qty;
   const port = S.collection.portfolios.find(p=>p.id===card.portfolio);
@@ -3073,7 +3182,7 @@ function buildCardActions(card, listed) {
   if (!S.user) return `<button class="cd-btn cd-btn-secondary" onclick="closeModal('cardDetailModal');openModal('loginModal')">Sign In to Buy or Track</button>`;
   let html = '';
   if (S.role === 'user') {
-    html += `<button class="cd-btn cd-btn-primary" onclick="addToCart('${card.id}')">🛒 Add to Cart — $${listed.toFixed(2)}</button>`;
+    html += `<button class="cd-btn cd-btn-primary" onclick="addToCart('${card.id}')">🛒 Add to Cart — ${window.CAD ? window.CAD.format(listed) : '$'+listed.toFixed(2)}</button>`;
     html += `<button class="cd-btn cd-btn-secondary" onclick="showAddToCollection('${card.id}')">📚 Add to My Collection</button>`;
   }
   if (S.role === 'seller' || S.role === 'admin') {
@@ -3083,7 +3192,7 @@ function buildCardActions(card, listed) {
       ${isListed ? '⏸ Unlist Portfolio from Store' : '✅ List Portfolio in Store'}
     </button>`;
     html += `<button class="cd-btn cd-btn-secondary" onclick="showAddToCollection('${card.id}')">📚 Add to My Collection</button>`;
-    html += `<button class="cd-btn cd-btn-primary" onclick="addToCart('${card.id}')">🛒 Add to Cart — $${listed.toFixed(2)}</button>`;
+    html += `<button class="cd-btn cd-btn-primary" onclick="addToCart('${card.id}')">🛒 Add to Cart — ${window.CAD ? window.CAD.format(listed) : '$'+listed.toFixed(2)}</button>`;
   }
   return html;
 }
@@ -3138,9 +3247,9 @@ function renderCollection() {
   const gain = totalMkt - totalPaid;
   const gainPct = totalPaid > 0 ? (gain/totalPaid*100) : 0;
   document.getElementById('collStats').innerHTML = `
-    <div class="stat-card"><div class="stat-label">Total Value</div><div class="stat-value yellow">$${totalMkt.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}</div></div>
-    <div class="stat-card"><div class="stat-label">Total Cost</div><div class="stat-value">$${totalPaid.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}</div></div>
-    <div class="stat-card"><div class="stat-label">Gain / Loss</div><div class="stat-value ${gain>=0?'green':''}">${gain>=0?'+':''}$${Math.abs(gain).toFixed(2)}</div><div class="stat-change ${gain>=0?'up':'dn'}">${gain>=0?'▲':'▼'} ${Math.abs(gainPct).toFixed(1)}%</div></div>
+    <div class="stat-card"><div class="stat-label">Total Value</div><div class="stat-value yellow">${window.CAD ? window.CAD.format(totalMkt) : '$'+totalMkt.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}</div></div>
+    <div class="stat-card"><div class="stat-label">Total Cost</div><div class="stat-value">${window.CAD ? window.CAD.format(totalPaid) : '$'+totalPaid.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}</div></div>
+    <div class="stat-card"><div class="stat-label">Gain / Loss</div><div class="stat-value ${gain>=0?'green':''}">${gain>=0?'+':''}${window.CAD ? window.CAD.format(Math.abs(gain)) : '$'+Math.abs(gain).toFixed(2)}</div><div class="stat-change ${gain>=0?'up':'dn'}">${gain>=0?'▲':'▼'} ${Math.abs(gainPct).toFixed(1)}%</div></div>
     <div class="stat-card"><div class="stat-label">Cards</div><div class="stat-value">${cards.length}</div></div>
     <div class="stat-card"><div class="stat-label">Portfolios</div><div class="stat-value">${portfolios.length}</div></div>
   `;
@@ -3218,9 +3327,12 @@ function renderCollTile(card) {
   const gain = card.market - (card.paid||0);
   const gainPct = card.paid > 0 ? (gain/card.paid*100) : 0;
   const emoji = card.cat==='sealed'?'📦':card.cat==='case'?'🗃':card.cat==='slab'?'🏆':card.game==='pokemon'?'⚡':'⚓';
+  const cachedImg = IMG_CACHE[card.id];
   return `<div class="tile collect-card coll-tile" data-card-id="${card.id}" onclick="openCollCard(S.collection.cards.find(c=>c.id==='${card.id}'))">
     <div class="thumb">
-      <div class="thumb-placeholder ${card.game==='pokemon'?'thumb-poke':'thumb-op'}">${emoji}</div>
+      ${cachedImg
+        ? `<img class="thumb-img" src="${cachedImg}" alt="${card.name}" style="width:100%;height:100%;object-fit:cover;">`
+        : `<div class="thumb-placeholder ${card.game==='pokemon'?'thumb-poke':'thumb-op'}">${emoji}</div>`}
       ${card.grader ? `<div class="gr-ribbon ${card.grader.toLowerCase()}">${card.grader}</div>` : ''}
       ${card.grade  ? `<div class="gr-num">${card.grade}</div>` : ''}
     </div>
@@ -3228,8 +3340,8 @@ function renderCollTile(card) {
       <div class="type-badge tb-${card.cat}">${card.cat==='raw'?'🃏 Raw':card.cat==='sealed'?'📦 Sealed':card.cat==='slab'?'🏆 Slab':'🗃 Case'}</div>
       <div class="card-name">${card.name}</div>
       <div class="card-set">${card.set}${card.num?' · '+card.num:''}</div>
-      <div class="price-row"><span class="price-final">$${card.market.toFixed(2)}</span></div>
-      ${card.paid ? `<div class="coll-gain ${gain>=0?'pos':'neg'}">${gain>=0?'▲':'▼'} ${Math.abs(gainPct).toFixed(1)}% (${gain>=0?'+':''}$${gain.toFixed(2)})</div>` : ''}
+      <div class="price-row"><span class="price-final">${window.CAD ? window.CAD.format(card.market) : '$'+card.market.toFixed(2)}</span></div>
+      ${card.paid ? `<div class="coll-gain ${gain>=0?'pos':'neg'}">${gain>=0?'▲':'▼'} ${Math.abs(gainPct).toFixed(1)}% (${gain>=0?'+':''}${window.CAD ? window.CAD.format(Math.abs(gain)) : '$'+Math.abs(gain).toFixed(2)})</div>` : ''}
       <div class="card-qty">Qty: ${card.qty}</div>
       <div class="coll-tile-actions">
         <button class="cta-btn del" onclick="event.stopPropagation();deleteCollCard('${card.id}')">🗑</button>
@@ -3497,10 +3609,11 @@ function renderCart() {
     <div class="cart-item">
       <div class="ci-thumb">${i.cat==='sealed'?'📦':'🃏'}</div>
       <div class="ci-info"><div class="ci-name">${i.name}</div><div class="ci-set">${i.set}</div></div>
-      <div class="ci-price">$${(i.price*i.qty).toFixed(2)}</div>
+      <div class="ci-price">${window.CAD ? window.CAD.format(i.price*i.qty) : '$'+(i.price*i.qty).toFixed(2)}</div>
       <button class="ci-remove" onclick="removeFromCart('${i.id}')">✕</button>
     </div>`).join('');
-  document.getElementById('cartTotal').textContent = '$'+S.cart.reduce((s,i)=>s+i.price*i.qty,0).toFixed(2);
+  const total = S.cart.reduce((s,i)=>s+i.price*i.qty,0);
+  document.getElementById('cartTotal').textContent = window.CAD ? window.CAD.format(total) : '$'+total.toFixed(2);
 }
 function doCheckout() { showToast('Checkout coming soon — contact seller to arrange','ℹ️'); }
 
@@ -3515,7 +3628,7 @@ function renderSellDashboard() {
   document.getElementById('sellStats').innerHTML = `
     <div class="sell-stat"><div class="ss-label">Listed Portfolios</div><div class="ss-val">${listed}</div></div>
     <div class="sell-stat"><div class="ss-label">Listed Cards</div><div class="ss-val">${listedCards.length}</div></div>
-    <div class="sell-stat"><div class="ss-label">Listed Value</div><div class="ss-val" style="color:#4ADE80;">$${totalVal.toLocaleString('en-US',{maximumFractionDigits:0})}</div></div>
+    <div class="sell-stat"><div class="ss-label">Listed Value</div><div class="ss-val" style="color:#4ADE80;">${window.CAD ? window.CAD.format(totalVal,0) : '$'+totalVal.toLocaleString('en-US',{maximumFractionDigits:0})}</div></div>
     <div class="sell-stat"><div class="ss-label">Total Inventory</div><div class="ss-val">${S.store.cards.length}</div></div>
   `;
   const grid = document.getElementById('sellPortfolioGrid');
@@ -3828,8 +3941,10 @@ function renderHomeGrid() {
   lazyLoadImages(allCards.slice(0,24), 'grid-home');
   const poke=allCards.filter(c=>c.game==='pokemon');
   const op=allCards.filter(c=>c.game==='onepiece');
-  document.getElementById('poke-stats').textContent=`${poke.length} listings · $${poke.reduce((s,c)=>s+calcPrice(c),0).toLocaleString('en-US',{maximumFractionDigits:0})} total`;
-  document.getElementById('op-stats').textContent=`${op.length} listings · $${op.reduce((s,c)=>s+calcPrice(c),0).toLocaleString('en-US',{maximumFractionDigits:0})} total`;
+  const pokeTotal = poke.reduce((s,c)=>s+calcPrice(c),0);
+  document.getElementById('poke-stats').textContent=`${poke.length} listings · ${window.CAD ? window.CAD.format(pokeTotal,0) : '$'+pokeTotal.toLocaleString('en-US',{maximumFractionDigits:0})} total`;
+  const opTotal = op.reduce((s,c)=>s+calcPrice(c),0);
+  document.getElementById('op-stats').textContent=`${op.length} listings · ${window.CAD ? window.CAD.format(opTotal,0) : '$'+opTotal.toLocaleString('en-US',{maximumFractionDigits:0})} total`;
   document.getElementById('sectionCards').style.display='';
 }
 
@@ -3877,10 +3992,16 @@ function renderTile(card, mode) {
       <div class="card-name">${card.name}</div>
       <div class="card-set">${card.set}${card.num?' · '+card.num:''}</div>
       <div class="price-row">
-        <span class="price-final">$${listed.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}</span>
-        ${hasPrem?`<span class="price-mkt">$${card.market.toFixed(2)}</span>`:''}
+        <span class="price-final">${window.CAD ? window.CAD.format(listed) : '$'+listed.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}</span>
       </div>
       <div class="card-qty">Qty: ${card.qty}</div>
+      <div class="cta-row">
+        ${S.user
+          ? ('<button class="cta-btn buy ' + (card.game==='onepiece'?'op':'') + '" onclick="event.stopPropagation();addToCart(\''+card.id+'\')">&#x1F6D2; Buy</button>' +
+             '<button class="cta-btn add" onclick="event.stopPropagation();showAddToCollection(\''+card.id+'\')">&#x1F4DA; Track</button>')
+          : '<button class="cta-btn buy" onclick="event.stopPropagation();openModal(\'loginModal\')">&#x1F6D2; Buy</button>'
+        }
+      </div>
     </div>
   </div>`;
 }
@@ -3908,7 +4029,14 @@ function lazyLoadImages(cards, gridId) {
               img.style.objectFit = 'contain';
               img.style.padding = '12px';
             }
-            img.onerror = () => img.remove(); // silently hide broken images
+            img.onerror = () => {
+                // Restore placeholder on broken image
+                const ph = document.createElement('div');
+                ph.style.cssText = 'width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-size:2.8rem;';
+                ph.textContent = card.cat==='sealed'?'📦':card.cat==='case'?'🗃':card.cat==='slab'?'🏆':card.game==='pokemon'?'⚡':'⚓';
+                img.replaceWith(ph);
+                delete IMG_CACHE[card.id];
+              }
             placeholder.replaceWith(img);
           }
         });
@@ -3981,6 +4109,48 @@ function showToast(msg, icon='✓', type='ok') {
   t.className='toast show '+type;
   clearTimeout(toastTmr);
   toastTmr=setTimeout(()=>t.classList.remove('show'),2800);
+}
+
+
+/* ══════════════════════════════════════
+   ADD CARD TO STORE (Seller)
+══════════════════════════════════════ */
+function openAddCardToStoreModal() {
+  if (S.role !== 'seller' && S.role !== 'admin') { showToast('Sellers only','⚠️','err'); return; }
+  document.getElementById('storeAddName').value = '';
+  document.getElementById('storeAddSet').value = '';
+  document.getElementById('storeAddNum').value = '';
+  document.getElementById('storeAddMarket').value = '';
+  document.getElementById('storeAddQty').value = '1';
+  document.getElementById('storeAddCat').value = 'raw';
+  document.getElementById('storeAddGrader').value = '';
+  document.getElementById('storeAddGrade').value = '';
+  document.getElementById('storeAddGame').value = 'pokemon';
+  // Populate folder select
+  const sel = document.getElementById('storeAddFolder');
+  sel.innerHTML = S.store.folders.map(f=>`<option value="${f.id}">${f.name} (${f.game})</option>`).join('');
+  openModal('addStoreCardModal');
+}
+
+function confirmAddStoreCard() {
+  const name   = document.getElementById('storeAddName').value.trim();
+  const set    = document.getElementById('storeAddSet').value.trim();
+  const num    = document.getElementById('storeAddNum').value.trim() || null;
+  const market = parseFloat(document.getElementById('storeAddMarket').value) || 0;
+  const qty    = parseInt(document.getElementById('storeAddQty').value) || 1;
+  const cat    = document.getElementById('storeAddCat').value;
+  const grader = document.getElementById('storeAddGrader').value || null;
+  const grade  = parseFloat(document.getElementById('storeAddGrade').value) || null;
+  const game   = document.getElementById('storeAddGame').value;
+  const folder = document.getElementById('storeAddFolder').value;
+  if (!name) { showToast('Card name required','⚠️','err'); return; }
+  if (!market) { showToast('Enter a market price','⚠️','err'); return; }
+  if (!folder) { showToast('Select a portfolio','⚠️','err'); return; }
+  const id = 'sc'+Date.now();
+  S.store.cards.push({ id, name, set, num, game, cat, grader, grade, market, paid:market, qty, folder });
+  renderAll(); renderSellDashboard();
+  closeModal('addStoreCardModal');
+  showToast(`${name} added to store`, '✅');
 }
 
 /* ══════════════════════════════════════
@@ -4329,13 +4499,13 @@ const JustTCG = {
   },
 
   async getCardImage(card) {
-    // Sealed & cases: show set/product image
+    // Sealed & cases: show set logo
     if (card.cat === 'sealed' || card.cat === 'case') {
       return this._getSealedImage(card);
     }
-    // Pokémon singles + slabs (slab = show the raw card inside)
+    // Pokémon singles + slabs (show the card art)
     if (card.game === 'pokemon') {
-      return this._getPokeImage(card);
+      return await this._fetchPokeImage(card);
     }
     // One Piece singles + slabs
     if (card.game === 'onepiece') {
@@ -4350,22 +4520,39 @@ const JustTCG = {
     '151':'sv3pt5','Evolving Skies':'swsh7','Base Set':'base1',
     'Paldean Fates':'sv4pt5','Paradox Rift':'sv4','Temporal Forces':'sv5',
     'Twilight Masquerade':'sv6','Stellar Crown':'sv7','Promos':'swshp',
-    'CoroCoro':'swshp','SV Base':'sv1','Scarlet & Violet Promos':'svp',
+    'CoroCoro':'swshp','SV Base':'sv1','Scarlet & Violet Promos':'svp','SV6':'sv6','SV7':'sv7','SV4':'sv4','SV3':'sv3','SV5':'sv5',
   },
 
   _getPokeImage(card) {
     const setCode = this._POKE_SETS[card.set];
-    const cardNum = card.num ? card.num.split('/')[0] : null;
-    if (setCode && cardNum && /^\d+$/.test(cardNum)) {
-      return `https://images.pokemontcg.io/${setCode}/${cardNum}_hires.png`;
+    let cardNum = card.num ? card.num.split('/')[0] : null;
+    if (!setCode || !cardNum) return null;
+    // Strip leading zeros — pokemontcg.io uses plain integers e.g. 4, not 004
+    if (/^\d+$/.test(cardNum)) {
+      cardNum = String(parseInt(cardNum, 10));
+    } else {
+      // Non-numeric promo numbers won't resolve to a known image
+      return null;
     }
-    return null;
+    // Use limitlesstcg as primary source (reliable, CORS-friendly)
+    const setMap = {
+      'sv3':'SV3','sv1':'SV1','pgo':'PGO','sv3pt5':'SV3pt5','swsh7':'SWSH7',
+      'base1':'BASE','sv4pt5':'SV4pt5','sv4':'SV4','sv5':'SV5','sv6':'SV6',
+      'sv7':'SV7','swshp':'SWSHP','svp':'SVP'
+    };
+    const ltSet = setMap[setCode];
+    if (ltSet) {
+      return `https://limitlesstcg.nyc3.digitaloceanspaces.com/tpci/${ltSet}/${ltSet}_${String(cardNum).padStart(3,'0')}_R_EN.webp`;
+    }
+    return `https://images.pokemontcg.io/${setCode}/${cardNum}_hires.png`;
   },
 
   _getOnePieceImage(card) {
-    // Official One Piece TCG card image CDN — num format e.g. "OP01-060"
+    // limitlesstcg CDN - CORS-friendly One Piece card images
     if (card.num && /^OP\d{2}-\d{3}$/i.test(card.num)) {
-      return `https://en.onepiece-cardgame.com/images/cardlist/card/${card.num.toUpperCase()}.png`;
+      const num = card.num.toUpperCase(); // e.g. OP01-060
+      const setCode = num.split('-')[0]; // e.g. OP01
+      return `https://limitlesstcg.nyc3.digitaloceanspaces.com/one-piece/${setCode}/${num}_EN.webp`;
     }
     return null;
   },
@@ -4381,7 +4568,8 @@ const JustTCG = {
       const match = (card.set || card.name || '').match(/OP(\d{2})/i);
       if (match) {
         const setId = `OP${match[1]}`;
-        return `https://en.onepiece-cardgame.com/images/products/${setId.toLowerCase()}_booster_en.png`;
+        // limitlesstcg booster box images
+        return `https://limitlesstcg.nyc3.digitaloceanspaces.com/one-piece/${setId}/${setId}_DISPLAY_EN.webp`;
       }
     }
     return null;
@@ -4480,15 +4668,15 @@ function doLogout() {
 /* ══════════════════════════════════════
    CARD DETAIL MODAL
 ══════════════════════════════════════ */
-async function openCard(card) {
+async async function openCard(card) {
   S.detailCard = card;
   const folder = S.store.folders.find(f => f.id === card.folder) || {};
   const listed = calcPrice(card);
 
   document.getElementById('cdTitle').textContent = card.name;
   document.getElementById('cdSet').textContent = `${card.set}${card.num ? ' · '+card.num : ''}`;
-  document.getElementById('cdMarket').textContent = '$'+card.market.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
-  document.getElementById('cdListed').textContent = '$'+listed.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+  document.getElementById('cdMarket').textContent = window.CAD ? window.CAD.format(card.market) : '$'+card.market.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+  document.getElementById('cdListed').textContent = window.CAD ? window.CAD.format(listed) : '$'+listed.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
   document.getElementById('cdQty').textContent = card.qty;
   document.getElementById('cdPortfolio').textContent = folder.name || '';
   const prem = listed - card.market;
@@ -4539,7 +4727,7 @@ async function openCollCard(card) {
   const listed = card.market;
   document.getElementById('cdTitle').textContent = card.name;
   document.getElementById('cdSet').textContent = `${card.set}${card.num ? ' · '+card.num : ''}`;
-  document.getElementById('cdMarket').textContent = '$'+card.market.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+  document.getElementById('cdMarket').textContent = window.CAD ? window.CAD.format(card.market) : '$'+card.market.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
   document.getElementById('cdListed').textContent = '$'+card.market.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
   document.getElementById('cdQty').textContent = card.qty;
   const port = S.collection.portfolios.find(p=>p.id===card.portfolio);
@@ -4573,7 +4761,7 @@ function buildCardActions(card, listed) {
   if (!S.user) return `<button class="cd-btn cd-btn-secondary" onclick="closeModal('cardDetailModal');openModal('loginModal')">Sign In to Buy or Track</button>`;
   let html = '';
   if (S.role === 'user') {
-    html += `<button class="cd-btn cd-btn-primary" onclick="addToCart('${card.id}')">🛒 Add to Cart — $${listed.toFixed(2)}</button>`;
+    html += `<button class="cd-btn cd-btn-primary" onclick="addToCart('${card.id}')">🛒 Add to Cart — ${window.CAD ? window.CAD.format(listed) : '$'+listed.toFixed(2)}</button>`;
     html += `<button class="cd-btn cd-btn-secondary" onclick="showAddToCollection('${card.id}')">📚 Add to My Collection</button>`;
   }
   if (S.role === 'seller' || S.role === 'admin') {
@@ -4583,7 +4771,7 @@ function buildCardActions(card, listed) {
       ${isListed ? '⏸ Unlist Portfolio from Store' : '✅ List Portfolio in Store'}
     </button>`;
     html += `<button class="cd-btn cd-btn-secondary" onclick="showAddToCollection('${card.id}')">📚 Add to My Collection</button>`;
-    html += `<button class="cd-btn cd-btn-primary" onclick="addToCart('${card.id}')">🛒 Add to Cart — $${listed.toFixed(2)}</button>`;
+    html += `<button class="cd-btn cd-btn-primary" onclick="addToCart('${card.id}')">🛒 Add to Cart — ${window.CAD ? window.CAD.format(listed) : '$'+listed.toFixed(2)}</button>`;
   }
   return html;
 }
@@ -4640,7 +4828,7 @@ function renderCollection() {
   document.getElementById('collStats').innerHTML = `
     <div class="stat-card"><div class="stat-label">Total Value</div><div class="stat-value yellow" data-usd="${totalMkt.toFixed(4)}">${window.CAD ? window.CAD.format(totalMkt) : '$'+totalMkt.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}</div></div>
     <div class="stat-card"><div class="stat-label">Total Cost</div><div class="stat-value" data-usd="${totalPaid.toFixed(4)}">${window.CAD ? window.CAD.format(totalPaid) : '$'+totalPaid.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}</div></div>
-    <div class="stat-card"><div class="stat-label">Gain / Loss</div><div class="stat-value ${gain>=0?'green':''}">${gain>=0?'+':''}$${Math.abs(gain).toFixed(2)}</div><div class="stat-change ${gain>=0?'up':'dn'}">${gain>=0?'▲':'▼'} ${Math.abs(gainPct).toFixed(1)}%</div></div>
+    <div class="stat-card"><div class="stat-label">Gain / Loss</div><div class="stat-value ${gain>=0?'green':''}">${gain>=0?'+':''}${window.CAD ? window.CAD.format(Math.abs(gain)) : '$'+Math.abs(gain).toFixed(2)}</div><div class="stat-change ${gain>=0?'up':'dn'}">${gain>=0?'▲':'▼'} ${Math.abs(gainPct).toFixed(1)}%</div></div>
     <div class="stat-card"><div class="stat-label">Cards</div><div class="stat-value">${cards.length}</div></div>
     <div class="stat-card"><div class="stat-label">Portfolios</div><div class="stat-value">${portfolios.length}</div></div>
   `;
@@ -4718,9 +4906,12 @@ function renderCollTile(card) {
   const gain = card.market - (card.paid||0);
   const gainPct = card.paid > 0 ? (gain/card.paid*100) : 0;
   const emoji = card.cat==='sealed'?'📦':card.cat==='case'?'🗃':card.cat==='slab'?'🏆':card.game==='pokemon'?'⚡':'⚓';
+  const cachedImg = IMG_CACHE[card.id];
   return `<div class="tile collect-card coll-tile" data-card-id="${card.id}" onclick="openCollCard(S.collection.cards.find(c=>c.id==='${card.id}'))">
     <div class="thumb">
-      <div class="thumb-placeholder ${card.game==='pokemon'?'thumb-poke':'thumb-op'}">${emoji}</div>
+      ${cachedImg
+        ? `<img class="thumb-img" src="${cachedImg}" alt="${card.name}" style="width:100%;height:100%;object-fit:cover;">`
+        : `<div class="thumb-placeholder ${card.game==='pokemon'?'thumb-poke':'thumb-op'}">${emoji}</div>`}
       ${card.grader ? `<div class="gr-ribbon ${card.grader.toLowerCase()}">${card.grader}</div>` : ''}
       ${card.grade  ? `<div class="gr-num">${card.grade}</div>` : ''}
     </div>
@@ -4729,7 +4920,7 @@ function renderCollTile(card) {
       <div class="card-name">${card.name}</div>
       <div class="card-set">${card.set}${card.num?' · '+card.num:''}</div>
       <div class="price-row"><span class="price-final" data-usd="${card.market.toFixed(4)}">${window.CAD ? window.CAD.format(card.market) : '$'+card.market.toFixed(2)}</span></div>
-      ${card.paid ? `<div class="coll-gain ${gain>=0?'pos':'neg'}">${gain>=0?'▲':'▼'} ${Math.abs(gainPct).toFixed(1)}% (${gain>=0?'+':''}$${gain.toFixed(2)})</div>` : ''}
+      ${card.paid ? `<div class="coll-gain ${gain>=0?'pos':'neg'}">${gain>=0?'▲':'▼'} ${Math.abs(gainPct).toFixed(1)}% (${gain>=0?'+':''}${window.CAD ? window.CAD.format(Math.abs(gain)) : '$'+Math.abs(gain).toFixed(2)})</div>` : ''}
       <div class="card-qty">Qty: ${card.qty}</div>
       <div class="coll-tile-actions">
         <button class="cta-btn del" onclick="event.stopPropagation();deleteCollCard('${card.id}')">🗑</button>
@@ -4997,10 +5188,11 @@ function renderCart() {
     <div class="cart-item">
       <div class="ci-thumb">${i.cat==='sealed'?'📦':'🃏'}</div>
       <div class="ci-info"><div class="ci-name">${i.name}</div><div class="ci-set">${i.set}</div></div>
-      <div class="ci-price">$${(i.price*i.qty).toFixed(2)}</div>
+      <div class="ci-price">${window.CAD ? window.CAD.format(i.price*i.qty) : '$'+(i.price*i.qty).toFixed(2)}</div>
       <button class="ci-remove" onclick="removeFromCart('${i.id}')">✕</button>
     </div>`).join('');
-  document.getElementById('cartTotal').textContent = '$'+S.cart.reduce((s,i)=>s+i.price*i.qty,0).toFixed(2);
+  const total = S.cart.reduce((s,i)=>s+i.price*i.qty,0);
+  document.getElementById('cartTotal').textContent = window.CAD ? window.CAD.format(total) : '$'+total.toFixed(2);
 }
 function doCheckout() { showToast('Checkout coming soon — contact seller to arrange','ℹ️'); }
 
@@ -5015,7 +5207,7 @@ function renderSellDashboard() {
   document.getElementById('sellStats').innerHTML = `
     <div class="sell-stat"><div class="ss-label">Listed Portfolios</div><div class="ss-val">${listed}</div></div>
     <div class="sell-stat"><div class="ss-label">Listed Cards</div><div class="ss-val">${listedCards.length}</div></div>
-    <div class="sell-stat"><div class="ss-label">Listed Value</div><div class="ss-val" style="color:#4ADE80;">$${totalVal.toLocaleString('en-US',{maximumFractionDigits:0})}</div></div>
+    <div class="sell-stat"><div class="ss-label">Listed Value</div><div class="ss-val" style="color:#4ADE80;">${window.CAD ? window.CAD.format(totalVal,0) : '$'+totalVal.toLocaleString('en-US',{maximumFractionDigits:0})}</div></div>
     <div class="sell-stat"><div class="ss-label">Total Inventory</div><div class="ss-val">${S.store.cards.length}</div></div>
   `;
   const grid = document.getElementById('sellPortfolioGrid');
@@ -5328,8 +5520,10 @@ function renderHomeGrid() {
   lazyLoadImages(allCards.slice(0,24), 'grid-home');
   const poke=allCards.filter(c=>c.game==='pokemon');
   const op=allCards.filter(c=>c.game==='onepiece');
-  document.getElementById('poke-stats').textContent=`${poke.length} listings · $${poke.reduce((s,c)=>s+calcPrice(c),0).toLocaleString('en-US',{maximumFractionDigits:0})} total`;
-  document.getElementById('op-stats').textContent=`${op.length} listings · $${op.reduce((s,c)=>s+calcPrice(c),0).toLocaleString('en-US',{maximumFractionDigits:0})} total`;
+  const pokeTotal = poke.reduce((s,c)=>s+calcPrice(c),0);
+  document.getElementById('poke-stats').textContent=`${poke.length} listings · ${window.CAD ? window.CAD.format(pokeTotal,0) : '$'+pokeTotal.toLocaleString('en-US',{maximumFractionDigits:0})} total`;
+  const opTotal = op.reduce((s,c)=>s+calcPrice(c),0);
+  document.getElementById('op-stats').textContent=`${op.length} listings · ${window.CAD ? window.CAD.format(opTotal,0) : '$'+opTotal.toLocaleString('en-US',{maximumFractionDigits:0})} total`;
   document.getElementById('sectionCards').style.display='';
 }
 
@@ -5378,9 +5572,15 @@ function renderTile(card, mode) {
       <div class="card-set">${card.set}${card.num?' · '+card.num:''}</div>
       <div class="price-row">
         <span class="price-final" data-usd="${listed.toFixed(4)}">${window.CAD ? window.CAD.format(listed) : '$'+listed.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}</span>
-        ${hasPrem?`<span class="price-mkt" data-usd="${card.market.toFixed(4)}">${window.CAD ? window.CAD.format(card.market) : '$'+card.market.toFixed(2)}</span>`:''}
       </div>
       <div class="card-qty">Qty: ${card.qty}</div>
+      <div class="cta-row">
+        ${S.user
+          ? ('<button class="cta-btn buy ' + (card.game==='onepiece'?'op':'') + '" onclick="event.stopPropagation();addToCart(\''+card.id+'\')">&#x1F6D2; Buy</button>' +
+             '<button class="cta-btn add" onclick="event.stopPropagation();showAddToCollection(\''+card.id+'\')">&#x1F4DA; Track</button>')
+          : '<button class="cta-btn buy" onclick="event.stopPropagation();openModal(\'loginModal\')">&#x1F6D2; Buy</button>'
+        }
+      </div>
     </div>
   </div>`;
 }
@@ -5408,7 +5608,14 @@ function lazyLoadImages(cards, gridId) {
               img.style.objectFit = 'contain';
               img.style.padding = '12px';
             }
-            img.onerror = () => img.remove(); // silently hide broken images
+            img.onerror = () => {
+                // Restore placeholder on broken image
+                const ph = document.createElement('div');
+                ph.style.cssText = 'width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-size:2.8rem;';
+                ph.textContent = card.cat==='sealed'?'📦':card.cat==='case'?'🗃':card.cat==='slab'?'🏆':card.game==='pokemon'?'⚡':'⚓';
+                img.replaceWith(ph);
+                delete IMG_CACHE[card.id];
+              }
             placeholder.replaceWith(img);
           }
         });
